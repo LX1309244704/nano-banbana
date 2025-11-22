@@ -1,10 +1,8 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Layers, 
   History, 
-  Image as ImageIcon, 
   Wand2, 
-  Edit3, 
   Combine, 
   Download, 
   Settings, 
@@ -15,15 +13,12 @@ import {
   Loader2, 
   Undo2, 
   Redo2, 
-  LogOut, 
   Layers as Blend, // 使用 Layers 替代 Blend
   LayoutTemplate, 
   ChevronDown,
   Eraser,
   PenTool,
-  Palette,
   Upload,
-  Move,
   Scissors,
   Maximize2,
   ScanLine,
@@ -37,35 +32,64 @@ import {
   Clock // 新增 Clock 图标
 } from 'lucide-react';
 
+// 类型定义
+interface PreviewImage {
+  url: string;
+  type?: 'image' | 'video';
+  prompt?: string;
+}
+
+interface HistoryItem {
+  id: string;
+  url: string;
+  thumbnail?: string;
+  prompt: string;
+  originalId?: string;
+  createdAt: number;
+  type?: 'image' | 'video';
+  aspectRatio?: string;
+}
+
+interface Layer {
+  id: string;
+  name: string;
+  visible: boolean;
+  type: string;
+  opacity: number;
+  blendMode: string;
+  x: number;
+  y: number;
+  scale: number;
+  url: string;
+}
+
 // --- 配置与常量 ---
 // 使用统一的 API 端点
 const API_BASE_URL = "https://api.jmyps.com";
 
-const GEMINI_TEXT_MODEL = "gemini-2.5-flash-preview-09-2025";
 const GEMINI_VISION_MODEL = "gemini-2.5-flash-image-preview"; 
-const IMAGEN_MODEL = "gemini-2.5-flash-image-preview"; 
 const DB_NAME = 'AIImageCreatorDB';
 const DB_STORE = 'images';
 
 // --- IndexedDB Utilities (Local High-Res Cache) ---
 const initDB = () => {
-  return new Promise((resolve, reject) => {
+  return new Promise<IDBDatabase>((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 1);
     request.onupgradeneeded = (event) => {
-      const db = event.target.result;
+      const db = (event.target as IDBOpenDBRequest).result;
       if (!db.objectStoreNames.contains(DB_STORE)) {
         db.createObjectStore(DB_STORE, { keyPath: 'id' });
       }
     };
-    request.onsuccess = (event) => resolve(event.target.result);
-    request.onerror = (event) => reject(event.target.error);
+    request.onsuccess = (event) => resolve((event.target as IDBOpenDBRequest).result);
+    request.onerror = (event) => reject((event.target as IDBOpenDBRequest).error);
   });
 };
 
-const saveToIndexedDB = async (id, data) => {
+const saveToIndexedDB = async (id: string, data: any) => {
   try {
     const db = await initDB();
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
       const transaction = db.transaction([DB_STORE], 'readwrite');
       const store = transaction.objectStore(DB_STORE);
       const request = store.put({ id, data, timestamp: Date.now() });
@@ -77,15 +101,15 @@ const saveToIndexedDB = async (id, data) => {
   }
 };
 
-const getFromIndexedDB = async (id) => {
+const getFromIndexedDB = async (id: string) => {
   try {
     const db = await initDB();
-    return new Promise((resolve, reject) => {
+    return new Promise<any>((resolve) => {
       const transaction = db.transaction([DB_STORE], 'readonly');
       const store = transaction.objectStore(DB_STORE);
       const request = store.get(id);
       request.onsuccess = () => resolve(request.result?.data);
-      request.onerror = (e) => resolve(null);
+      request.onerror = () => resolve(null);
     });
   } catch (e) {
     console.warn("IndexedDB Read Failed", e);
@@ -133,30 +157,30 @@ export default function App() {
   const [prompt, setPrompt] = useState('');
   
   // Canvas & Layers
-  const [layers, setLayers] = useState([
+  const [layers, setLayers] = useState<Layer[]>([
     { id: 'bg-1', name: '背景层', visible: true, type: 'background', opacity: 100, blendMode: 'normal', x: 0, y: 0, scale: 1, url: 'https://picsum.photos/800/600?random=init' }
   ]);
   const [selectedLayerId, setSelectedLayerId] = useState('bg-1');
-  const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
   
   // Undo/Redo Stacks
-  const [undoStack, setUndoStack] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
+  const [undoStack, setUndoStack] = useState<any[]>([]);
+  const [redoStack, setRedoStack] = useState<any[]>([]);
   
   // Interaction State
   const [isGenerating, setIsGenerating] = useState(false);
   const [isRemovingBg, setIsRemovingBg] = useState(false); 
-  const [errorMsg, setErrorMsg] = useState('');
   const [aspectRatio, setAspectRatio] = useState('1:1'); 
   const [videoDuration, setVideoDuration] = useState(10); // 修改为数字默认值
   const [brushSize, setBrushSize] = useState(30); 
   const [activeBrush, setActiveBrush] = useState(BRUSH_PALETTE[0]); 
   const [isDrawing, setIsDrawing] = useState(false); 
-  const [previewImage, setPreviewImage] = useState(null); 
+  const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null); 
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('api_key') || '');
+  const [errorMsg, setErrorMsg] = useState('');
 
   // Preview Modal State
   const [previewScale, setPreviewScale] = useState(1);
@@ -173,11 +197,11 @@ export default function App() {
     initialLayerY: 0
   });
   
-  const dragStartLayersRef = useRef(null);
+  const dragStartLayersRef = useRef<any[] | null>(null);
 
-  const canvasRef = useRef(null); 
-  const maskCanvasRef = useRef(null); 
-  const fileInputRef = useRef(null); 
+  const canvasRef = useRef<HTMLDivElement>(null); 
+  const maskCanvasRef = useRef<HTMLCanvasElement>(null); 
+  const fileInputRef = useRef<HTMLInputElement>(null); 
 
   // --- Helper: Get Target Dimensions ---
   const getTargetDimensions = () => {
@@ -222,7 +246,7 @@ export default function App() {
 
   // --- History & Undo/Redo Logic ---
   const recordHistory = () => {
-    setUndoStack(prev => [...prev, layers]);
+    setUndoStack(prev => [...prev, layers as any]);
     setRedoStack([]); 
   };
 
@@ -230,7 +254,7 @@ export default function App() {
     if (undoStack.length === 0) return;
     const previousLayers = undoStack[undoStack.length - 1];
     const newUndoStack = undoStack.slice(0, undoStack.length - 1);
-    setRedoStack(prev => [layers, ...prev]); 
+    setRedoStack(prev => [layers as any, ...prev]); 
     setLayers(previousLayers);
     setUndoStack(newUndoStack);
   };
@@ -239,24 +263,26 @@ export default function App() {
     if (redoStack.length === 0) return;
     const nextLayers = redoStack[0];
     const newRedoStack = redoStack.slice(1);
-    setUndoStack(prev => [...prev, layers]);
+    setUndoStack(prev => [...prev, layers as any]);
     setLayers(nextLayers);
     setRedoStack(newRedoStack);
   };
 
   // --- Mask Drawing Logic ---
-  const getCanvasCoordinates = (e, canvas) => {
+  const getCanvasCoordinates = (e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
 
     let clientX, clientY;
-    if (e.nativeEvent?.type?.startsWith('touch')) {
+    if ('touches' in e && e.touches.length > 0) {
        clientX = e.touches[0].clientX;
        clientY = e.touches[0].clientY;
     } else {
-       clientX = e.nativeEvent?.clientX || e.clientX;
-       clientY = e.nativeEvent?.clientY || e.clientY;
+       // 这是一个鼠标事件，强制转换
+       const mouseEvent = e as React.MouseEvent;
+       clientX = mouseEvent.clientX;
+       clientY = mouseEvent.clientY;
     }
     
     return {
@@ -265,7 +291,7 @@ export default function App() {
     };
   };
 
-  const startDrawing = (e) => {
+  const startDrawing = (e: React.MouseEvent | React.TouchEvent) => {
     if (activeMode !== 'mask') return;
     const canvas = maskCanvasRef.current;
     if (!canvas) return;
@@ -286,7 +312,7 @@ export default function App() {
     setIsDrawing(true);
   };
 
-  const draw = (e) => {
+  const draw = (e: React.MouseEvent | React.TouchEvent) => {
     if (!isDrawing || activeMode !== 'mask') return;
     const canvas = maskCanvasRef.current;
     if (!canvas) return;
@@ -318,7 +344,7 @@ export default function App() {
   };
 
   // --- Dragging Logic ---
-  const handleDragStart = (e, layerId) => {
+  const handleDragStart = (e: React.MouseEvent | React.TouchEvent, layerId: string) => {
     if (activeMode !== 'compose') return;
     const layer = layers.find(l => l.id === layerId);
     if (!layer || layer.type === 'background') return;
@@ -329,7 +355,7 @@ export default function App() {
     setSelectedLayerId(layerId);
 
     let clientX, clientY;
-    if (e.type === 'touchstart') {
+    if ('touches' in e) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
     } else {
@@ -346,11 +372,11 @@ export default function App() {
     });
   };
 
-  const handleDragMove = (e) => {
+  const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
     if (!dragState.isDragging || activeMode !== 'compose') return;
 
     let clientX, clientY;
-    if (e.type === 'touchmove') {
+    if ('touches' in e) {
       clientX = e.touches[0].clientX;
       clientY = e.touches[0].clientY;
     } else {
@@ -380,7 +406,7 @@ export default function App() {
   };
 
   // --- Wheel Zoom for Layers ---
-  const handleWheel = (e, layerId) => {
+  const handleWheel = (e: React.WheelEvent, layerId: string) => {
     if (activeMode !== 'compose') return;
     const layer = layers.find(l => l.id === layerId);
     if (!layer || layer.type === 'background') return;
@@ -395,25 +421,25 @@ export default function App() {
   };
 
   // --- Preview Modal Interactions ---
-  const handlePreviewWheel = (e) => {
+  const handlePreviewWheel = (e: React.WheelEvent) => {
     e.stopPropagation();
     const scaleDelta = -e.deltaY * 0.001;
     setPreviewScale(prev => Math.max(0.5, Math.min(5, prev + scaleDelta)));
   };
 
-  const handlePreviewMouseDown = (e) => {
+  const handlePreviewMouseDown = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsPreviewDragging(true);
-    const clientX = e.clientX || e.touches?.[0].clientX;
-    const clientY = e.clientY || e.touches?.[0].clientY;
+    const clientX = e.clientX;
+    const clientY = e.clientY;
     setPreviewDragStart({ x: clientX - previewOffset.x, y: clientY - previewOffset.y });
   };
 
-  const handlePreviewMouseMove = (e) => {
+  const handlePreviewMouseMove = (e: React.MouseEvent) => {
     if (!isPreviewDragging) return;
     e.preventDefault();
-    const clientX = e.clientX || e.touches?.[0].clientX;
-    const clientY = e.clientY || e.touches?.[0].clientY;
+    const clientX = e.clientX;
+    const clientY = e.clientY;
     setPreviewOffset({
       x: clientX - previewDragStart.x,
       y: clientY - previewDragStart.y
@@ -424,7 +450,7 @@ export default function App() {
     setIsPreviewDragging(false);
   };
 
-  const handlePreviewZoom = (delta) => {
+  const handlePreviewZoom = (delta: number) => {
     setPreviewScale(prev => Math.max(0.5, Math.min(5, prev + delta)));
   };
 
@@ -464,7 +490,7 @@ export default function App() {
   };
 
   // --- Helper: Get Visual State for AI ---
-  const getVisualImageBase64 = (layer, width, height) => {
+  const getVisualImageBase64 = (layer: any, width: number, height: number) => {
      return new Promise((resolve, reject) => {
          const tempCanvas = document.createElement('canvas');
          tempCanvas.width = width;
@@ -522,7 +548,7 @@ export default function App() {
      });
   };
 
-  const compressImage = (base64Str, maxWidth = 600, quality = 0.7) => {
+  const compressImage = (base64Str: string, maxWidth = 600, quality = 0.7) => {
     return new Promise((resolve) => {
       // 如果是视频，不压缩直接返回（或处理缩略图）
       // 这里简单判断如果不是 data:image 开头，可能是 URL
@@ -556,7 +582,7 @@ export default function App() {
     });
   };
 
-  const urlToBase64 = async (url) => {
+  const urlToBase64 = async (url: string) => {
     try {
       if (url.startsWith('data:image/')) {
         return url.split(',')[1];
@@ -565,7 +591,13 @@ export default function App() {
       const blob = await response.blob();
       return new Promise((resolve, reject) => {
         const reader = new FileReader();
-        reader.onloadend = () => resolve(reader.result.split(',')[1]);
+        reader.onloadend = () => {
+          if (typeof reader.result === 'string') {
+            resolve(reader.result.split(',')[1]);
+          } else {
+            reject(new Error("Failed to read image data as string"));
+          }
+        };
         reader.onerror = reject;
         reader.readAsDataURL(blob);
       });
@@ -574,27 +606,32 @@ export default function App() {
     }
   };
 
-  const handleUploadImage = (e) => {
+  const handleUploadImage = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files[0];
     if (!file) return;
     
     recordHistory();
 
     const reader = new FileReader();
-    reader.onload = (event) => {
-        const isVideo = file.type.startsWith('video/');
-        const newLayer = {
-            id: `upload-${Date.now()}`,
-            name: `上传: ${file.name.substring(0, 10)}`,
-            visible: true,
-            type: isVideo ? 'video' : 'overlay',
-            opacity: 100, 
-            blendMode: 'normal',
-            x: 0,
-            y: 0,
-            scale: 1,
-            url: event.target.result
-        };
+        reader.onload = (event) => {
+            if (typeof event.target.result !== 'string') {
+                console.error('Failed to read file as data URL');
+                return;
+            }
+            
+            const isVideo = file.type.startsWith('video/');
+            const newLayer: Layer = {
+                id: `upload-${Date.now()}`,
+                name: `上传: ${file.name.substring(0, 10)}`,
+                visible: true,
+                type: isVideo ? 'video' : 'overlay',
+                opacity: 100, 
+                blendMode: 'normal',
+                x: 0,
+                y: 0,
+                scale: 1,
+                url: event.target.result
+            };
         setLayers(prev => [newLayer, ...prev]);
         setSelectedLayerId(newLayer.id);
         if (activeMode !== 'compose') setActiveMode('compose');
@@ -658,7 +695,7 @@ export default function App() {
   };
 
   // --- History Storage (IndexedDB + LocalStorage) ---
-  const addToHistory = async (imageUrl, promptText, type = 'generate') => {
+  const addToHistory = async (imageUrl: string, promptText: string, type = 'generate') => {
     const historyId = crypto.randomUUID();
     try {
       // 视频 URL 直接存，不做压缩（除非有缩略图生成逻辑）
@@ -667,13 +704,13 @@ export default function App() {
       
       const savedUrl = isVideo ? imageUrl : await compressImage(imageUrl, 600, 0.6);
       
-      const newItem = {
+      const newItem: HistoryItem = {
         id: historyId,
         originalId: historyId,
-        url: savedUrl,
-        thumbnail: savedUrl, // 视频应该有缩略图，这里简化直接用 URL
+        url: savedUrl as string,
+        thumbnail: savedUrl as string, // 视频应该有缩略图，这里简化直接用 URL
         prompt: promptText,
-        type: type,
+        type: type as 'image' | 'video',
         aspectRatio: aspectRatio,
         createdAt: Date.now()
       };
@@ -687,7 +724,7 @@ export default function App() {
     }
   };
   
-  const fetchHighQualityImage = async (item) => {
+  const fetchHighQualityImage = async (item: HistoryItem) => {
     if (!item.originalId) return item.url;
     const localImage = await getFromIndexedDB(item.originalId);
     return localImage || item.url;
@@ -702,7 +739,7 @@ export default function App() {
   };
 
   // --- Video API Functions (Updated with User Config and Duration) ---
-  const createVideoTask = async (prompt, aspectRatio, duration, images = []) => {
+  const createVideoTask = async (prompt: string, aspectRatio: string, duration: number, images: string[] = []) => {
     // 简单验证
     if (!apiKey) throw new Error("请在设置中配置 API Key");
 
@@ -739,7 +776,7 @@ export default function App() {
     return data.id || data.task_id;
   };
 
-  const pollVideoTask = async (taskId) => {
+  const pollVideoTask = async (taskId: string) => {
     if (!taskId) throw new Error("任务ID为空");
 
     const maxAttempts = 120; // Increased to 120 attempts (10 mins total with 5s interval)
@@ -827,7 +864,7 @@ export default function App() {
           // 3. 轮询结果
           newImageUrl = await pollVideoTask(taskId);
           
-          const newLayer = {
+          const newLayer: Layer = {
             id: `video-${Date.now()}`,
             name: 'AI 视频',
             visible: true,
@@ -878,7 +915,7 @@ export default function App() {
         if (data.data && data.data[0] && data.data[0].url) {
           newImageUrl = data.data[0].url;
           
-          const newLayer = {
+          const newLayer: Layer = {
             id: `layer-${Date.now()}`,
             name: '生成背景',
             visible: true,
@@ -936,7 +973,7 @@ export default function App() {
         
         if (resultBase64) {
           newImageUrl = `data:image/png;base64,${resultBase64}`;
-          const newLayer = {
+          const newLayer: Layer = {
             id: `composite-${Date.now()}`,
             name: '合成结果',
             visible: true,
@@ -1019,14 +1056,14 @@ export default function App() {
     }
   };
 
-  const updateLayer = (id, key, value) => {
+  const updateLayer = (id: string, key: string, value: any) => {
     if (key === 'blendMode') {
       recordHistory();
     }
     setLayers(layers.map(l => l.id === id ? { ...l, [key]: value } : l));
   };
 
-  const deleteLayer = (id) => {
+  const deleteLayer = (id: string) => {
     recordHistory();
     const newLayers = layers.filter(l => l.id !== id);
     setLayers(newLayers);
@@ -1035,10 +1072,10 @@ export default function App() {
     }
   };
 
-  const handleAddToCanvas = async (item) => {
+  const handleAddToCanvas = async (item: HistoryItem) => {
     recordHistory();
     const imageUrl = await fetchHighQualityImage(item);
-    const newLayer = {
+    const newLayer: Layer = {
       id: `history-${Date.now()}`,
       name: item.type === 'video' ? `视频: ${item.prompt.slice(0, 8)}...` : `历史: ${item.prompt.slice(0, 8)}...`,
       visible: true,
@@ -1053,12 +1090,12 @@ export default function App() {
     if (activeMode !== 'compose') setActiveMode('compose');
   };
 
-  const handlePreview = async (item) => {
+  const handlePreview = async (item: HistoryItem) => {
       const imageUrl = await fetchHighQualityImage(item);
       setPreviewImage({ ...item, url: imageUrl });
   };
 
-  const handleDeleteHistory = async (item) => {
+  const handleDeleteHistory = async (item: HistoryItem) => {
     try {
       // 从IndexedDB删除高分辨率图片
       if (item.originalId) {
@@ -1129,7 +1166,7 @@ export default function App() {
         
         if (drawable) {
             ctx.globalAlpha = layer.opacity / 100;
-            ctx.globalCompositeOperation = layer.blendMode;
+            ctx.globalCompositeOperation = layer.blendMode as GlobalCompositeOperation;
             
             if (layer.id === bgLayer?.id) {
                  ctx.drawImage(drawable, 0, 0, canvas.width, canvas.height);
@@ -1276,7 +1313,7 @@ export default function App() {
                 ) : (
                    <img src={layer.url} className="w-full h-full object-cover" alt="" />
                 )}
-              </div>
+            </div>
 
               <div className="flex-1 min-w-0">
                 <div className={`text-sm truncate font-medium ${selectedLayerId === layer.id ? 'text-indigo-200' : 'text-slate-300'}`}>
@@ -1451,7 +1488,7 @@ export default function App() {
                   `}
                   style={{ 
                     opacity: layer.opacity / 100,
-                    mixBlendMode: layer.blendMode,
+                    mixBlendMode: layer.blendMode as any,
                     transform: `translate(${layer.x || 0}px, ${layer.y || 0}px) scale(${layer.scale || 1})`
                   }}
                 >
@@ -1541,7 +1578,7 @@ export default function App() {
                           <span className="text-[10px] text-slate-400 hidden sm:inline">大小</span>
                           <input 
                             type="range" min="5" max="100" 
-                            value={brushSize} onChange={(e) => setBrushSize(e.target.value)}
+                            value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))}
                             className="w-16 sm:w-20 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-400"
                             title={`大小: ${brushSize}px`}
                           />
@@ -1554,7 +1591,7 @@ export default function App() {
                              <button
                                key={color.id}
                                onClick={() => setActiveBrush(color)}
-                               className={`w-4 h-4 rounded-full ${color.className} transition-all ${activeBrush.id === color.id ? 'ring-2 scale-110' : 'opacity-60 hover:opacity-100'}`}
+                               className={`w-4 h-4 rounded-full ${color.css} transition-all ${activeBrush.id === color.id ? 'ring-2 scale-110' : 'opacity-60 hover:opacity-100'}`}
                                title={`颜色: ${color.label}`}
                              />
                           ))}
@@ -1747,7 +1784,7 @@ export default function App() {
                onMouseUp={handlePreviewMouseUp}
                onClick={(e) => e.stopPropagation()}
             >
-               {previewImage.type === 'video' ? (
+               {previewImage && previewImage.type === 'video' ? (
                    <video 
                      src={previewImage.url} 
                      controls 
@@ -1759,7 +1796,7 @@ export default function App() {
                         transition: isPreviewDragging ? 'none' : 'transform 0.1s ease-out'
                      }}
                    />
-               ) : (
+               ) : previewImage ? (
                    <img 
                      src={previewImage.url} 
                      alt="Preview" 
@@ -1769,7 +1806,7 @@ export default function App() {
                      }}
                      className="max-w-full max-h-full object-contain rounded-lg shadow-2xl pointer-events-none"
                    />
-               )}
+               ) : null}
             </div>
             
             <div className="absolute bottom-8 flex gap-2 items-center bg-black/60 backdrop-blur px-4 py-2 rounded-full pointer-events-auto z-50">
