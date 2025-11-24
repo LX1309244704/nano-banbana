@@ -67,7 +67,21 @@ interface Layer {
 // 使用统一的 API 端点
 const API_BASE_URL = "https://api.jmyps.com";
 
-const GEMINI_VISION_MODEL = "gemini-2.5-flash-image-preview"; 
+// Vision Models
+const VISION_MODELS = [
+  { value: "gemini-2.5-flash-image-preview", label: "Gemini 2.5 Flash" },
+  { value: "gemini-3-pro-image-preview", label: "Gemini 3 Pro (更高精度)" }
+];
+
+const DEFAULT_VISION_MODEL = "gemini-2.5-flash-image-preview";
+
+// Resolution Options
+const RESOLUTIONS = [
+  { value: "1k", label: "1K (标准)", width: 1024, height: 1024 },
+  { value: "2k", label: "2K (高清)", width: 2048, height: 2048 },
+  { value: "4k", label: "4K (超高清)", width: 4096, height: 4096 }
+];
+
 const DB_NAME = 'AIImageCreatorDB';
 const DB_STORE = 'images';
 
@@ -175,7 +189,11 @@ export default function App() {
   const [brushSize, setBrushSize] = useState(30); 
   const [activeBrush, setActiveBrush] = useState(BRUSH_PALETTE[0]); 
   const [isDrawing, setIsDrawing] = useState(false); 
-  const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null); 
+  const [previewImage, setPreviewImage] = useState<PreviewImage | null>(null);
+  
+  // Model & Resolution Settings
+  const [visionModel, setVisionModel] = useState(DEFAULT_VISION_MODEL);
+  const [resolution, setResolution] = useState('1k'); 
 
   // Settings State
   const [showSettings, setShowSettings] = useState(false);
@@ -205,7 +223,20 @@ export default function App() {
 
   // --- Helper: Get Target Dimensions ---
   const getTargetDimensions = () => {
-    return ASPECT_RATIOS.find(r => r.value === aspectRatio) || ASPECT_RATIOS[0];
+    const baseDim = ASPECT_RATIOS.find(r => r.value === aspectRatio) || ASPECT_RATIOS[0];
+    const resolutionDim = RESOLUTIONS.find(r => r.value === resolution) || RESOLUTIONS[0];
+    
+    // 如果选择的是高分辨率，按比例缩放基础尺寸
+    if (resolution !== '1k') {
+      const scaleFactor = resolutionDim.width / 1024; // 基于1K的缩放比例
+      return {
+        ...baseDim,
+        width: Math.round(baseDim.width * scaleFactor),
+        height: Math.round(baseDim.height * scaleFactor)
+      };
+    }
+    
+    return baseDim;
   };
 
   // Reset Preview on open
@@ -655,7 +686,7 @@ export default function App() {
     try {
       const base64Image = await urlToBase64(selectedLayer.url);
       const response = await fetch(
-        `${API_BASE_URL}/v1beta/models/${GEMINI_VISION_MODEL}:generateContent`,
+        `${API_BASE_URL}/v1beta/models/${visionModel}:generateContent`,
         {
           method: 'POST',
           headers: { 
@@ -952,7 +983,7 @@ export default function App() {
         ];
 
       const response = await fetch(
-        `${API_BASE_URL}/v1beta/models/${GEMINI_VISION_MODEL}:generateContent`,
+        `${API_BASE_URL}/v1beta/models/${visionModel}:generateContent`,
         {
           method: 'POST',
           headers: { 
@@ -1010,7 +1041,7 @@ export default function App() {
         ];
         
       const response = await fetch(
-        `${API_BASE_URL}/v1beta/models/${GEMINI_VISION_MODEL}:generateContent`,
+        `${API_BASE_URL}/v1beta/models/${visionModel}:generateContent`,
         {
           method: 'POST',
           headers: { 
@@ -1573,40 +1604,73 @@ export default function App() {
 
                   {/* Mask Tools */}
                   {activeMode === 'mask' && (
-                    <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700">
-                       <div className="flex items-center gap-1 px-2">
-                          <span className="text-[10px] text-slate-400 hidden sm:inline">大小</span>
-                          <input 
-                            type="range" min="5" max="100" 
-                            value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))}
-                            className="w-16 sm:w-20 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-400"
-                            title={`大小: ${brushSize}px`}
-                          />
-                       </div>
-                       
-                       <div className="w-px h-4 bg-slate-700 mx-1"></div>
-                       
-                       <div className="flex items-center gap-1">
-                          {BRUSH_PALETTE.map(color => (
-                             <button
-                               key={color.id}
-                               onClick={() => setActiveBrush(color)}
-                               className={`w-4 h-4 rounded-full ${color.css} transition-all ${activeBrush.id === color.id ? 'ring-2 scale-110' : 'opacity-60 hover:opacity-100'}`}
-                               title={`颜色: ${color.label}`}
-                             />
-                          ))}
-                       </div>
+                    <div className="flex flex-wrap gap-2 items-center">
+                      {/* Brush Tools */}
+                      <div className="flex items-center gap-2 bg-slate-800 p-1 rounded-lg border border-slate-700">
+                         <div className="flex items-center gap-1 px-2">
+                            <span className="text-[10px] text-slate-400 hidden sm:inline">大小</span>
+                            <input 
+                              type="range" min="5" max="100" 
+                              value={brushSize} onChange={(e) => setBrushSize(Number(e.target.value))}
+                              className="w-16 sm:w-20 h-1 bg-slate-600 rounded-lg appearance-none cursor-pointer accent-indigo-400"
+                              title={`大小: ${brushSize}px`}
+                            />
+                         </div>
+                         
+                         <div className="w-px h-4 bg-slate-700 mx-1"></div>
+                         
+                         <div className="flex items-center gap-1">
+                            {BRUSH_PALETTE.map(color => (
+                               <button
+                                 key={color.id}
+                                 onClick={() => setActiveBrush(color)}
+                                 className={`w-4 h-4 rounded-full ${color.css} transition-all ${activeBrush.id === color.id ? 'ring-2 scale-110' : 'opacity-60 hover:opacity-100'}`}
+                                 title={`颜色: ${color.label}`}
+                               />
+                            ))}
+                         </div>
 
-                       <div className="w-px h-4 bg-slate-700 mx-1"></div>
+                         <div className="w-px h-4 bg-slate-700 mx-1"></div>
 
-                       <button 
-                         onClick={clearMask}
-                         className="text-xs flex items-center gap-1 text-slate-400 hover:text-red-400 px-2 py-0.5 hover:bg-slate-700 rounded transition-colors"
-                         title="清除遮罩"
-                       >
-                         <Eraser size={12} />
-                         <span className="hidden sm:inline">清除</span>
-                       </button>
+                         <button 
+                           onClick={clearMask}
+                           className="text-xs flex items-center gap-1 text-slate-400 hover:text-red-400 px-2 py-0.5 hover:bg-slate-700 rounded transition-colors"
+                           title="清除遮罩"
+                         >
+                           <Eraser size={12} />
+                           <span className="hidden sm:inline">清除</span>
+                         </button>
+                      </div>
+
+                      {/* Model Selector */}
+                      <div className="relative flex items-center">
+                         <Wand2 size={14} className="absolute left-2 text-slate-500 pointer-events-none"/>
+                         <select 
+                            value={visionModel} 
+                            onChange={(e) => setVisionModel(e.target.value)}
+                            className="bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700 rounded pl-7 pr-8 py-1 focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer transition-colors"
+                         >
+                            {VISION_MODELS.map(model => (
+                               <option key={model.value} value={model.value}>{model.label}</option>
+                            ))}
+                         </select>
+                         <ChevronDown size={12} className="absolute right-2 text-slate-500 pointer-events-none"/>
+                      </div>
+
+                      {/* Resolution Selector */}
+                      <div className="relative flex items-center">
+                         <Maximize2 size={14} className="absolute left-2 text-slate-500 pointer-events-none"/>
+                         <select 
+                            value={resolution} 
+                            onChange={(e) => setResolution(e.target.value)}
+                            className="bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 border border-slate-700 rounded pl-7 pr-8 py-1 focus:outline-none focus:border-indigo-500 appearance-none cursor-pointer transition-colors"
+                         >
+                            {RESOLUTIONS.map(res => (
+                               <option key={res.value} value={res.value}>{res.label}</option>
+                            ))}
+                         </select>
+                         <ChevronDown size={12} className="absolute right-2 text-slate-500 pointer-events-none"/>
+                      </div>
                     </div>
                   )}
 
